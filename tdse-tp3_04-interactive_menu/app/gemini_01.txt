@@ -1,0 +1,55 @@
+Claro, aquí tienes el análisis y la explicación del funcionamiento de esos tres archivos.
+
+Estos archivos son utilidades de bajo nivel. `board.h` define el hardware específico, `dwt.h` proporciona herramientas para medir el tiempo de ejecución con alta precisión, y `systick.c` ofrece una función de retardo (delay) bloqueante.
+
+---
+
+### 🏛️ `board.h` (Definiciones de la Placa)
+
+Este archivo es una **Capa de Abstracción de Hardware (HAL)**. Su único propósito es "mapear" nombres genéricos de componentes de hardware (como botones y LEDs) a los pines físicos específicos del microcontrolador que se está utilizando.
+
+* **Funcionamiento:**
+    * Utiliza directivas de preprocesador de C (`#if`, `#define`).
+    * Una macro principal, `BOARD`, se configura con un valor que identifica la placa (en tu caso, `NUCLEO_F103RC`).
+    * Basado en ese valor, se activa un bloque de definiciones. Por ejemplo, para la `NUCLEO_F103RC`, define:
+        * `BTN_ENT_PIN` como `D10_Pin`.
+        * `BTN_ENT_PORT` como `D10_GPIO_Port`.
+        * `BTN_ENT_PRESSED` como `GPIO_PIN_RESET` (esto significa que el botón se considera "presionado" cuando el pin está en nivel lógico bajo).
+        * Hace lo mismo para los otros botones (`BTN_NEX`, `BTN_ESC`) y el LED (`LED_A`).
+* **Finalidad en el Proyecto:**
+    * Permite que el resto del código (como `task_sensor.c`) use nombres genéricos (`BTN_ENT_PIN`, `BTN_ENT_PORT`) en lugar de pines específicos (`D10_Pin`, `D10_GPIO_Port`).
+    * Esto hace que el proyecto sea **portable**. Si quisieras usar este mismo código en una placa diferente (ej. una STM32F429I_DISC1), solo tendrías que cambiar el valor de la macro `BOARD` en este archivo, y todo el código se adaptaría automáticamente sin necesidad de modificar la lógica de las tareas.
+
+---
+
+### ⏱️ `dwt.h` (Medidor de Ciclos de CPU)
+
+Este archivo es una herramienta de **medición de rendimiento (profiling)**. Proporciona funciones para usar el contador de ciclos del núcleo ARM Cortex-M, permitiendo medir el tiempo de ejecución del código con una precisión de nanosegundos.
+
+* **Funcionamiento:**
+    * Utiliza el periférico **DWT (Data Watchpoint and Trace)** del CPU, que incluye un registro de 32 bits llamado `CYCCNT` (Cycle Counter). Este registro se incrementa con cada ciclo de reloj del CPU.
+    * El archivo define varias funciones `static inline` (para que sean muy rápidas y no tengan sobrecarga de llamada a función):
+        * `cycle_counter_init()`: Activa el periférico DWT y empieza a contar los ciclos.
+        * `cycle_counter_reset()`: Pone el contador `CYCCNT` a cero.
+        * `cycle_counter_get()`: Devuelve el número *bruto* de ciclos de reloj transcurridos.
+        * `cycle_counter_get_time_us()`: Esta es la función clave. Lee el contador de ciclos y lo divide por la frecuencia del sistema en MHz (`SystemCoreClock / 1000000`) para convertir el conteo de ciclos en **microsegundos (µs)**.
+* **Finalidad en el Proyecto:**
+    * Este es el archivo que **permite que `app.c` mida las variables** `g_app_runtime_us` y `task_dta_list[index].WCET`.
+    * En `app.c`, `cycle_counter_reset()` se llama *antes* de ejecutar una tarea, y `cycle_counter_get_time_us()` se llama *después*. La diferencia entre ambas es el tiempo de ejecución de esa tarea en microsegundos.
+
+---
+
+### ⏳ `systick.c` (Retardo Bloqueante en µs)
+
+Este archivo implementa una única función, `systick_delay_us(uint32_t delay_us)`, que proporciona un **retardo bloqueante** (también conocido como "espera activa" o *busy-waiting*) usando el temporizador SysTick del sistema.
+
+* **Funcionamiento:**
+    * A diferencia del `HAL_Delay()` (que usa la interrupción de SysTick), esta función trabaja leyendo directamente el registro del contador SysTick (`SysTick->VAL`), que es un contador que va *hacia abajo* (cuenta de un valor de recarga hasta 0).
+    * **1. Cálculo:** Primero, calcula cuántos "ticks" del contador SysTick equivalen a los microsegundos solicitados. Lo hace multiplicando `delay_us` por la frecuencia del reloj en MHz (`SystemCoreClock / 1000000UL`).
+    * **2. Bucle de Espera:** Entra en un bucle `while(1)` que no hace nada más que leer continuamente el valor actual del contador (`current = SysTick->VAL`).
+    * **3. Medición:** Calcula cuántos ticks han pasado desde que se llamó a la función (`elapsed`). Maneja correctamente el caso en que el contador llegue a 0 y se recargue (conocido como *wrap-around*).
+    * **4. Salida:** Solo sale del bucle (`break;`) cuando el tiempo transcurrido (`elapsed`) es igual o mayor al tiempo objetivo (`target`).
+* **Finalidad en el Proyecto:**
+    * Se usa en el archivo `display.c` (que te mostré anteriormente). El controlador del LCD requiere pausas muy cortas y precisas (de 1 a 37 microsegundos) para enviar comandos correctamente.
+    * Como esta función **paraliza totalmente la ejecución del CPU** (es bloqueante), no debe usarse en la lógica principal de las tareas (como `task_menu_update`), pero es aceptable para estos retardos muy cortos en un controlador de bajo nivel.
+    * El tiempo que el CPU pasa "atrapado" dentro de `systick_delay_us` es medido por `dwt.h` y **contribuye** al `WCET` de la `task_menu_update` (ya que esta tarea llama a las funciones del display).

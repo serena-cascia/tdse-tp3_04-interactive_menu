@@ -1,0 +1,10 @@
+  app.c (app.h)
+   Endless loops, which execute tasks with fixed computing time. This 
+   sequential execution is only deviated from when an interrupt event occurs.
+En nuestro caso observamos la primera vez que: 
+La variable g_app_runtime_us se inicializa en 0 ms y finaliza en 10 us.
+El campo WCET inicializa en 0 ms para cada tarea y luego cambia para la tarea sensor a 10 ms y para la menu a 3 us.
+En nuestro caso observamos la segunda vez que: 
+La variable g_app_runtime_us se inicializa en 0 ms y finaliza en 15 us.
+El campo WCET inicializa en 0 ms para cada tarea y luego cambia para la tarea sensor a 11 ms y para la menu a 25 us.
+...
